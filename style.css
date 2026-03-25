@@ -20,7 +20,7 @@ canvas {
 .overlay {
   position: fixed;
   inset: 0;
-  background: rgba(5,5,16,0.95);
+  background: rgba(5,5,16,0.97);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -29,7 +29,7 @@ canvas {
 }
 
 .overlay.hidden {
-  display: none;
+  display: none !important;
 }
 
 @keyframes fadeIn {
@@ -39,30 +39,29 @@ canvas {
 
 .tutorial-content {
   width: 100%;
-  max-width: 400px;
-  padding: 24px 20px;
+  max-width: 420px;
+  padding: 28px 20px;
   text-align: center;
 }
 
 /* Title */
 .tut-title {
-  font-size: 2.2rem;
+  font-size: 2.4rem;
   font-weight: 700;
-  letter-spacing: 6px;
+  letter-spacing: 8px;
   font-family: 'Courier New', monospace;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
 }
 
-.neon-green { color: #00ff88; text-shadow: 0 0 20px #00ff88, 0 0 40px #00ff8866; }
-.neon-pink  { color: #ff00aa; text-shadow: 0 0 20px #ff00aa, 0 0 40px #ff00aa66; }
-.neon-blue  { color: #00ddff; text-shadow: 0 0 20px #00ddff; }
-.neon-gold  { color: #ffdd00; text-shadow: 0 0 20px #ffdd00; }
-.neon-red   { color: #ff4444; text-shadow: 0 0 20px #ff4444; }
-.neon-yellow { color: #ffdd00; }
+.neon-green { color: #00ff88; text-shadow: 0 0 15px #00ff88; }
+.neon-pink  { color: #ff00aa; text-shadow: 0 0 15px #ff00aa; }
+.neon-blue  { color: #00ddff; text-shadow: 0 0 15px #00ddff; }
+.neon-gold  { color: #ffdd00; text-shadow: 0 0 15px #ffdd00; }
+.neon-red   { color: #ff4444; text-shadow: 0 0 15px #ff4444; }
 
 .tut-subtitle {
-  color: #666;
-  font-size: 0.75rem;
+  color: #444;
+  font-size: 0.72rem;
   font-family: 'Courier New', monospace;
   letter-spacing: 2px;
   margin-bottom: 28px;
@@ -72,8 +71,8 @@ canvas {
 .tut-rules {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-bottom: 24px;
+  gap: 8px;
+  margin-bottom: 20px;
   text-align: left;
 }
 
@@ -81,18 +80,16 @@ canvas {
   display: flex;
   align-items: center;
   gap: 14px;
-  background: rgba(255,255,255,0.03);
-  border: 1px solid rgba(255,255,255,0.06);
+  background: rgba(255,255,255,0.025);
+  border: 1px solid rgba(255,255,255,0.05);
   border-radius: 12px;
-  padding: 12px 14px;
+  padding: 11px 14px;
 }
 
-/* Icon circles */
-.tut-icon-circle {
-  width: 44px;
-  height: 44px;
-  border-radius: 50%;
-  border: 2px solid;
+/* Icon area */
+.tut-icon {
+  width: 52px;
+  height: 52px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -100,82 +97,34 @@ canvas {
   position: relative;
 }
 
-.neon-green-border { border-color: #00ff88; }
-.neon-pink-border  { border-color: #ff00aa; }
-.neon-blue-border  { border-color: #00ddff; }
-.neon-gold-border  { border-color: #ffdd00; }
-.neon-red-border   { border-color: #ff4444; }
-
-/* TAP dot */
-.tut-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  box-shadow: 0 0 10px currentColor;
-}
-
-/* Arrow */
-.tut-arrow {
-  width: 0; height: 0;
-  position: relative;
-}
-.tut-arrow-up {
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-bottom: 10px solid currentColor;
-}
-.tut-arrow-down {
-  border-left: 6px solid transparent;
-  border-right: 6px solid transparent;
-  border-top: 10px solid currentColor;
-}
-
-/* Hold ring */
-.tut-hold-ring {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
-  border: 3px solid currentColor;
-  box-shadow: 0 0 8px currentColor;
-}
-
-/* Double circles */
-.tut-double {
-  width: 36px;
-  height: 16px;
-  border-radius: 16px;
-  border: 2px solid currentColor;
-  box-shadow: 0 0 8px currentColor;
-}
-
 /* Info text */
 .tut-info { flex: 1; }
 .tut-name {
-  font-size: 0.9rem;
+  font-size: 0.88rem;
   color: #fff;
   font-family: 'Courier New', monospace;
   font-weight: bold;
   margin-bottom: 2px;
 }
 .tut-en {
-  font-size: 0.7rem;
-  color: #666;
+  font-size: 0.68rem;
+  color: #555;
   font-weight: normal;
   margin-left: 4px;
 }
 .tut-desc {
-  font-size: 0.78rem;
-  color: #888;
+  font-size: 0.75rem;
+  color: #777;
 }
 
 /* Tip */
 .tut-tip {
-  background: rgba(255,215,0,0.06);
-  border: 1px solid rgba(255,215,0,0.15);
+  background: rgba(255,215,0,0.05);
+  border: 1px solid rgba(255,215,0,0.12);
   border-radius: 10px;
   padding: 12px;
-  font-size: 0.78rem;
-  color: #888;
+  font-size: 0.76rem;
+  color: #777;
   line-height: 1.6;
   margin-bottom: 20px;
 }
@@ -190,26 +139,26 @@ canvas {
   border: none;
   border-radius: 14px;
   padding: 16px;
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 700;
   font-family: 'Courier New', monospace;
   cursor: pointer;
   letter-spacing: 2px;
-  transition: transform 0.15s, box-shadow 0.15s;
-  box-shadow: 0 0 20px #00ff8844;
-  margin-bottom: 10px;
+  transition: transform 0.12s, box-shadow 0.12s;
+  box-shadow: 0 0 20px #00ff8830;
+  margin-bottom: 8px;
 }
 .btn-start:active {
   transform: scale(0.97);
-  box-shadow: 0 0 10px #00ff8822;
+  box-shadow: 0 0 8px #00ff8820;
 }
 
 .btn-skip {
   background: transparent;
   border: none;
-  color: #444;
-  font-size: 0.78rem;
+  color: #3a3a3a;
+  font-size: 0.76rem;
   cursor: pointer;
   padding: 8px;
 }
-.btn-skip:active { color: #666; }
+.btn-skip:hover { color: #555; }
