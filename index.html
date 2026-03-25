@@ -57,6 +57,7 @@ let shakeTimer = 0;
 let lastTime = 0;
 let scorePopups = [];
 let missedCount = 0;
+let buttonHitArea = null;
 let successCount = 0;
 
 // ===== Object Types =====
@@ -293,51 +294,23 @@ function scorePopup(x, y, text, color) {
   scorePopups.push({ x, y, text, color, life: 1, vy: -2 });
 }
 
-// ===== Touch Handling =====
-let touches = {}; // id -> {x,y}
+// ===== Touch & Button Handling =====
 let activeHolds = {}; // id -> object
+let touchStartPos = {}; // id -> {x, y}
 
-canvas.addEventListener('touchstart', handleTouchStart, {passive:false});
-canvas.addEventListener('touchend', handleTouchEnd, {passive:false});
-canvas.addEventListener('touchcancel', handleTouchEnd, {passive:false});
-canvas.addEventListener('mousedown', handleMouseDown);
-canvas.addEventListener('mouseup', handleMouseUp);
-
-// Mouse fallback for desktop
-let mouseDown = false;
-function handleMouseDown(e) {
-  e.preventDefault();
-  const t = { x: e.clientX, y: e.clientY };
-  touches['mouse'] = t;
-  processTouch('start', t.x, t.y, 'mouse');
-}
-function handleMouseUp(e) {
-  const t = touches['mouse'];
-  if (t) processTouch('end', t.x, t.y, 'mouse');
-  delete touches['mouse'];
-  mouseDown = false;
-}
-
-function handleTouchStart(e) {
-  e.preventDefault();
-  for (const t of e.changedTouches) {
-    touches[t.identifier] = { x: t.clientX, y: t.clientY };
-    processTouch('start', t.clientX, t.clientY, t.identifier);
+function handlePointer(action, x, y, id) {
+  // Check buttons first (menu and gameover)
+  if (buttonHitArea && action === 'start') {
+    const b = buttonHitArea;
+    if (x >= b.x && x <= b.x+b.w && y >= b.y && y <= b.y+b.h) {
+      b.cb();
+      return;
+    }
   }
-}
 
-function handleTouchEnd(e) {
-  e.preventDefault();
-  for (const t of e.changedTouches) {
-    const touch = touches[t.identifier];
-    if (touch) processTouch('end', touch.x, touch.y, t.identifier);
-    delete touches[t.identifier];
-  }
-}
-
-function processTouch(action, x, y, id) {
   if (state !== 'playing') return;
 
+  // Find hit object
   for (let i = objects.length-1; i>=0; i--) {
     const o = objects[i];
     const dx = x - o.x;
@@ -345,6 +318,8 @@ function processTouch(action, x, y, id) {
     const dist = Math.sqrt(dx*dx + dy*dy);
 
     if (action === 'start') {
+      touchStartPos[id] = { x, y };
+
       if (o.type === 'tap' && dist < o.size + 30) {
         hitObject(o, i, x, y);
         return;
@@ -352,9 +327,7 @@ function processTouch(action, x, y, id) {
       if (o.type === 'double_tap' && dist < o.size + 30) {
         o.tapCount++;
         burst(x, y, o.color, 6);
-        if (o.tapCount >= 2) {
-          hitObject(o, i, x, y);
-        }
+        if (o.tapCount >= 2) { hitObject(o, i, x, y); }
         return;
       }
       if (o.type === 'hold') {
@@ -362,35 +335,70 @@ function processTouch(action, x, y, id) {
         o.holding = true;
         return;
       }
-      if (o.type === 'swipe_up' && y < H*0.5) {
-        // Swipe up detected
-        hitObject(o, i, x, y);
-        return;
-      }
-      if (o.type === 'swipe_down' && y > H*0.5) {
-        hitObject(o, i, x, y);
+      if (o.type === 'swipe_up' || o.type === 'swipe_down') {
+        // Swipe handled on end
+        activeHolds[id] = o;
         return;
       }
     }
 
     if (action === 'end') {
-      if (o.type === 'swipe_up' || o.type === 'swipe_down') {
-        // Check if was a swipe gesture (finger moved up/down significantly)
-        const startY = touches[id] ? touches[id].y : y;
-        // We already handled in start for up/down, just check if still alive
-      }
+      const startPos = touchStartPos[id];
+      delete touchStartPos[id];
+
       if (activeHolds[id] === o) {
-        activeHolds[id] = null;
-        o.holding = false;
-        // Release too early = miss
-        if (o.holdProgress < o.holdTarget) {
-          missObject(o, i);
+        if (o.type === 'hold') {
+          activeHolds[id] = null;
+          o.holding = false;
+          if (o.holdProgress < o.holdTarget) { missObject(o, i); }
+        } else if (o.type === 'swipe_up' || o.type === 'swipe_down') {
+          activeHolds[id] = null;
+          if (startPos) {
+            const dy = startPos.y - y; // positive = swipe up
+            const swipeDist = Math.abs(dy);
+            if (swipeDist > 30) {
+              if ((o.type === 'swipe_up' && dy > 0) || (o.type === 'swipe_down' && dy < 0)) {
+                hitObject(o, i, o.x, o.y);
+              } else {
+                missObject(o, i);
+              }
+            }
+          }
         }
-        return;
       }
     }
   }
 }
+
+// Touch events
+canvas.addEventListener('touchstart', function(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    handlePointer('start', t.clientX, t.clientY, t.identifier);
+  }
+}, {passive:false});
+
+canvas.addEventListener('touchend', function(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    handlePointer('end', t.clientX, t.clientY, t.identifier);
+  }
+}, {passive:false});
+
+canvas.addEventListener('touchcancel', function(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    handlePointer('end', t.clientX, t.clientY, t.identifier);
+  }
+}, {passive:false});
+
+// Mouse events
+canvas.addEventListener('mousedown', function(e) {
+  handlePointer('start', e.clientX, e.clientY, 'mouse');
+});
+canvas.addEventListener('mouseup', function(e) {
+  handlePointer('end', e.clientX, e.clientY, 'mouse');
+});
 
 function hitObject(o, idx, x, y) {
   objects.splice(idx, 1);
@@ -738,17 +746,6 @@ function drawNeonButton(x, y, text, color, onClick) {
   ctx.restore();
 }
 
-let buttonHitArea = null;
-
-// Click/tap on button (for menu/gameover)
-canvas.addEventListener('click', function(e) {
-  if (!buttonHitArea) return;
-  const b = buttonHitArea;
-  if (e.clientX >= b.x && e.clientX <= b.x+b.w && e.clientY >= b.y && e.clientY <= b.y+b.h) {
-    b.cb();
-  }
-});
-
 // ===== Game Control =====
 function startGame() {
   state = 'playing';
@@ -765,7 +762,6 @@ function startGame() {
   spawnInterval = 2000;
   missedCount = 0;
   successCount = 0;
-  buttonHitArea = null;
   // Spawn first object quickly
   setTimeout(spawnObject, 500);
 }
