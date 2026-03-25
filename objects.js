@@ -89,7 +89,8 @@ const OBJECT_TYPES = [
       o.y = H/2 + (Math.random()-0.5)*H*0.35;
       o.holdProgress = 0;
       o.holding = false;
-      o.holdTarget = 1.2 + Math.random() * 0.8;
+      // 初始值，后续在 spawnObject 中会根据当前速度重新计算
+      o.holdTarget = 1.2;
     },
     draw: function(o, ctx, now) {
       ctx.save();
