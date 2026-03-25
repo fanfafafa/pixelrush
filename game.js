@@ -72,9 +72,16 @@ function spawnObject() {
   const template = pool[Math.floor(Math.random()*pool.length)];
   const o = Object.assign({}, template);
   o.id = Date.now() + Math.random();
-  o.life = Math.max(1.2, 3.0 - speed * 0.4);
+  o.life = Math.max(1.0, 2.8 - speed * 0.35); // 随速度加快，对象存活时间缩短
   o.pulse = 0;
   o.size = template.type === 'double_tap' ? 38 : template.type === 'hold' ? 50 : template.type === 'tap' ? 44 : 50;
+
+  // HOLD 蓄力时间随速度调整：速度越快，需要的蓄力时间越短
+  if (template.type === 'hold') {
+    // 基础 1.2 秒，随速度递减，最少 0.4 秒
+    o.holdTarget = Math.max(0.4, 1.4 - speed * 0.2);
+  }
+
   template.onAppear(o, W, H);
   objects.push(o);
 }
