@@ -19,6 +19,95 @@ canvas { display:block; }
 <body>
 <canvas id="c"></canvas>
 <script>
+// ===== Audio System (Web Audio API) =====
+let audioCtx = null;
+function getAudioCtx() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  if (audioCtx.state === 'suspended') audioCtx.resume();
+  return audioCtx;
+}
+
+// Short beep sound
+function playBeep(freq, type, dur, vol) {
+  try {
+    const ctx = getAudioCtx();
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type || 'sine';
+    osc.frequency.setValueAtTime(freq, now);
+    gain.gain.setValueAtTime(vol || 0.25, now);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now);
+    osc.stop(now + dur);
+  } catch(e) {}
+}
+
+// Hit sound - bright upward chirp
+function playHit() {
+  playBeep(880, 'sine', 0.1, 0.3);
+  setTimeout(() => playBeep(1320, 'sine', 0.08, 0.2), 40);
+}
+
+// Miss sound - low thud
+function playMiss() {
+  playBeep(150, 'sawtooth', 0.25, 0.2);
+  playBeep(80, 'sine', 0.3, 0.15);
+}
+
+// Combo sound - escalating
+function playCombo(level) {
+  const baseFreq = 440 + level * 110;
+  playBeep(baseFreq, 'sine', 0.06, 0.2);
+  setTimeout(() => playBeep(baseFreq * 1.25, 'sine', 0.06, 0.18), 50);
+  setTimeout(() => playBeep(baseFreq * 1.5, 'sine', 0.1, 0.15), 100);
+}
+
+// Hold charge sound
+let holdOsc = null, holdGain = null;
+function startHoldSound(freq) {
+  try {
+    stopHoldSound();
+    const ctx = getAudioCtx();
+    holdOsc = ctx.createOscillator();
+    holdGain = ctx.createGain();
+    holdOsc.type = 'triangle';
+    holdOsc.frequency.value = freq || 300;
+    holdGain.gain.value = 0;
+    holdOsc.connect(holdGain);
+    holdGain.connect(ctx.destination);
+    holdOsc.start();
+  } catch(e) {}
+}
+function updateHoldSound(progress) {
+  if (holdGain) {
+    holdGain.gain.setTargetAtTime(0.15 * Math.min(progress, 1), audioCtx.currentTime, 0.05);
+  }
+}
+function stopHoldSound() {
+  try {
+    if (holdOsc) { holdOsc.stop(); holdOsc = null; holdGain = null; }
+  } catch(e) {}
+}
+
+// Game over sound
+function playGameOver() {
+  playBeep(440, 'sine', 0.2, 0.3);
+  setTimeout(() => playBeep(330, 'sine', 0.2, 0.25), 200);
+  setTimeout(() => playBeep(220, 'sine', 0.3, 0.2), 400);
+  setTimeout(() => playBeep(110, 'sine', 0.6, 0.15), 600);
+}
+
+// Combo break sound
+function playComboBreak() {
+  playBeep(200, 'sawtooth', 0.15, 0.2);
+  playBeep(150, 'sawtooth', 0.15, 0.15);
+}
+
 // ===== Canvas Setup =====
 const canvas = document.getElementById('c');
 const ctx = canvas.getContext('2d');
@@ -412,17 +501,25 @@ function hitObject(o, idx, x, y) {
   shakeTimer = 0.1;
   scorePopup(o.x, o.y-20, '+'+pts+'  x'+multiplier, o.color);
   if (highScore < score) highScore = score;
+  stopHoldSound();
+  playHit();
+  if (combo >= 3) playCombo(Math.min(Math.floor(combo/3), 5));
 }
 
 function missObject(o, idx) {
   objects.splice(idx, 1);
   burst(o.x, o.y, COLORS.neon5, 8);
+  const hadCombo = combo >= 2;
   combo = 0;
   lives--;
   shakeTimer = 0.25;
   missedCount++;
   scorePopup(o.x, o.y-20, 'MISS', COLORS.neon5);
+  stopHoldSound();
+  playMiss();
+  if (hadCombo) playComboBreak();
   if (lives <= 0) {
+    playGameOver();
     endGame();
   }
 }
@@ -462,6 +559,7 @@ function update(dt) {
     if (o.type === 'hold') {
       if (o.holding) {
         o.holdProgress += dt;
+        updateHoldSound(o.holdProgress / o.holdTarget);
         if (o.holdProgress >= o.holdTarget) {
           hitObject(o, i, o.x, o.y);
           return;
