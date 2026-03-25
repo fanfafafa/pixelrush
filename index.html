@@ -1,0 +1,794 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+<title>PIXEL RUSH · 像素冲击</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body {
+  background: #050510;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+canvas { display:block; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<script>
+// ===== Canvas Setup =====
+const canvas = document.getElementById('c');
+const ctx = canvas.getContext('2d');
+let W, H;
+function resize() {
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ===== Game Constants =====
+const COLORS = {
+  bg: '#050510',
+  neon1: '#00ff88',
+  neon2: '#ff00aa',
+  neon3: '#00ddff',
+  neon4: '#ffdd00',
+  neon5: '#ff4444',
+  white: '#ffffff',
+  dark: '#111122'
+};
+
+// ===== Game State =====
+let state = 'menu'; // menu | playing | gameover
+let score = 0;
+let highScore = parseInt(localStorage.getItem('pixelrush_hs') || '0');
+let lives = 3;
+let speed = 1;
+let speedTimer = 0;
+let combo = 0;
+let comboTimer = 0;
+let objects = [];
+let particles = [];
+let shakeTimer = 0;
+let lastTime = 0;
+let scorePopups = [];
+let missedCount = 0;
+let successCount = 0;
+
+// ===== Object Types =====
+const OBJECT_TYPES = [
+  {
+    type: 'tap',
+    color: COLORS.neon1,
+    shape: 'circle',
+    size: 44,
+    desc: 'TAP',
+    onAppear: function(o) {
+      o.x = W/2 + (Math.random()-0.5)*W*0.6;
+      o.y = H/2 + (Math.random()-0.5)*H*0.4;
+    },
+    draw: function(o) {
+      ctx.save();
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = 25 + Math.sin(Date.now()*0.005)*8;
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.size + (o.pulse||0), 0, Math.PI*2);
+      ctx.stroke();
+      // inner
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.size*0.4, 0, Math.PI*2);
+      ctx.stroke();
+      // pixel dot
+      ctx.fillStyle = o.color;
+      drawPixelRect(ctx, o.x-4, o.y-4, 8, 8);
+      // label
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('TAP', o.x, o.y + o.size + 22);
+      ctx.restore();
+    }
+  },
+  {
+    type: 'swipe_up',
+    color: COLORS.neon2,
+    shape: 'arrow',
+    size: 50,
+    desc: '↑ SWIPE',
+    onAppear: function(o) {
+      o.x = W/2 + (Math.random()-0.5)*W*0.5;
+      o.y = H * 0.65;
+    },
+    draw: function(o) {
+      ctx.save();
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = 3;
+      // Arrow body
+      drawPixelRect(ctx, o.x-4, o.y-30, 8, 50);
+      // Arrow head
+      drawPixelRect(ctx, o.x-18, o.y-48, 36, 10);
+      drawPixelRect(ctx, o.x-12, o.y-38, 24, 8);
+      drawPixelRect(ctx, o.x-6, o.y-28, 12, 6);
+      // glow ring
+      ctx.globalAlpha = 0.3 + Math.sin(Date.now()*0.006)*0.2;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.size + 10 + (o.pulse||0), 0, Math.PI*2);
+      ctx.stroke();
+      ctx.restore();
+    }
+  },
+  {
+    type: 'swipe_down',
+    color: COLORS.neon3,
+    shape: 'arrow',
+    size: 50,
+    desc: '↓ SWIPE',
+    onAppear: function(o) {
+      o.x = W/2 + (Math.random()-0.5)*W*0.5;
+      o.y = H * 0.35;
+    },
+    draw: function(o) {
+      ctx.save();
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = 3;
+      // Arrow body
+      drawPixelRect(ctx, o.x-4, o.y-20, 8, 50);
+      // Arrow head down
+      drawPixelRect(ctx, o.x-18, o.y+38, 36, 10);
+      drawPixelRect(ctx, o.x-12, o.y+30, 24, 8);
+      drawPixelRect(ctx, o.x-6, o.y+22, 12, 6);
+      ctx.restore();
+    }
+  },
+  {
+    type: 'hold',
+    color: COLORS.neon4,
+    shape: 'circle',
+    size: 50,
+    desc: 'HOLD',
+    onAppear: function(o) {
+      o.x = W/2 + (Math.random()-0.5)*W*0.6;
+      o.y = H/2 + (Math.random()-0.5)*H*0.35;
+      o.holdProgress = 0;
+      o.holding = false;
+      o.holdTarget = 1.2 + Math.random() * 0.8;
+      o.ringRadius = 0;
+    },
+    draw: function(o) {
+      ctx.save();
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = 3;
+      // Outer target ring
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.size + 15, 0, Math.PI*2);
+      ctx.stroke();
+      // Progress arc
+      if (o.holdProgress > 0) {
+        ctx.beginPath();
+        ctx.arc(o.x, o.y, o.size + 15, -Math.PI/2, -Math.PI/2 + Math.PI*2*Math.min(o.holdProgress/o.holdTarget,1));
+        ctx.strokeStyle = COLORS.neon4;
+        ctx.shadowColor = COLORS.neon4;
+        ctx.lineWidth = 4;
+        ctx.stroke();
+      }
+      // Main circle
+      ctx.strokeStyle = o.color;
+      ctx.shadowColor = o.color;
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.size + (o.pulse||0), 0, Math.PI*2);
+      ctx.stroke();
+      // Center fill
+      const alpha = 0.15 + (o.holdProgress/o.holdTarget)*0.3;
+      ctx.fillStyle = `rgba(255,221,0,${alpha})`;
+      ctx.beginPath();
+      ctx.arc(o.x, o.y, o.size*0.7, 0, Math.PI*2);
+      ctx.fill();
+      // HOLD label
+      ctx.fillStyle = o.color;
+      ctx.font = 'bold 11px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('HOLD', o.x, o.y + o.size + 22);
+      ctx.restore();
+    }
+  },
+  {
+    type: 'double_tap',
+    color: COLORS.neon5,
+    shape: 'double',
+    size: 38,
+    desc: '2x TAP',
+    onAppear: function(o) {
+      o.x = W/2 + (Math.random()-0.5)*W*0.5;
+      o.y = H/2 + (Math.random()-0.5)*H*0.35;
+      o.tapCount = 0;
+      o.tapTimer = 0;
+      o.done = false;
+    },
+    draw: function(o) {
+      ctx.save();
+      ctx.shadowColor = o.color;
+      ctx.shadowBlur = 20;
+      ctx.strokeStyle = o.color;
+      ctx.lineWidth = 3;
+      // Two circles
+      const gap = 28 + (o.pulse||0);
+      ctx.beginPath();
+      ctx.arc(o.x - gap/2, o.y, o.size, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(o.x + gap/2, o.y, o.size, 0, Math.PI*2);
+      ctx.stroke();
+      // Taps done indicator
+      const done1 = o.tapCount >= 1;
+      const done2 = o.tapCount >= 2;
+      if (done1) { ctx.fillStyle = o.color; ctx.beginPath(); ctx.arc(o.x-gap/2,o.y,o.size*0.5,0,Math.PI*2); ctx.fill(); }
+      if (done2) { ctx.fillStyle = o.color; ctx.beginPath(); ctx.arc(o.x+gap/2,o.y,o.size*0.5,0,Math.PI*2); ctx.fill(); }
+      ctx.fillStyle = o.color;
+      ctx.font = 'bold 10px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText('2x TAP', o.x, o.y + o.size + 22);
+      ctx.restore();
+    }
+  }
+];
+
+// ===== Pixel Draw Helper =====
+function drawPixelRect(c, x, y, w, h) {
+  c.fillStyle = c.strokeStyle;
+  c.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
+}
+
+// ===== Spawn =====
+let spawnTimer = 0;
+let spawnInterval = 2000;
+
+function spawnObject() {
+  // Choose type based on speed
+  let pool;
+  if (speed < 1.5) {
+    pool = OBJECT_TYPES.slice(0, 3); // tap, swipe_up, swipe_down
+  } else if (speed < 2.5) {
+    pool = OBJECT_TYPES.slice(0, 4); // add hold
+  } else {
+    pool = OBJECT_TYPES; // all
+  }
+  const template = pool[Math.floor(Math.random()*pool.length)];
+  const o = { ...template, id: Date.now()+Math.random(), life: 1, pulse: 0, appeared: Date.now() };
+  template.onAppear(o);
+  objects.push(o);
+  // Set lifetime based on speed
+  o.maxLife = Math.max(1.2, 3.0 - speed*0.4);
+  o.life = o.maxLife;
+}
+
+// ===== Particles =====
+function burst(x, y, color, count) {
+  for (let i=0; i<count; i++) {
+    const angle = (Math.PI*2/count)*i + Math.random()*0.5;
+    const speed = 3 + Math.random()*5;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle)*speed,
+      vy: Math.sin(angle)*speed,
+      color,
+      size: 4 + Math.random()*4,
+      life: 1
+    });
+  }
+}
+
+function scorePopup(x, y, text, color) {
+  scorePopups.push({ x, y, text, color, life: 1, vy: -2 });
+}
+
+// ===== Touch Handling =====
+let touches = {}; // id -> {x,y}
+let activeHolds = {}; // id -> object
+
+canvas.addEventListener('touchstart', handleTouchStart, {passive:false});
+canvas.addEventListener('touchend', handleTouchEnd, {passive:false});
+canvas.addEventListener('touchcancel', handleTouchEnd, {passive:false});
+canvas.addEventListener('mousedown', handleMouseDown);
+canvas.addEventListener('mouseup', handleMouseUp);
+
+// Mouse fallback for desktop
+let mouseDown = false;
+function handleMouseDown(e) {
+  e.preventDefault();
+  const t = { x: e.clientX, y: e.clientY };
+  touches['mouse'] = t;
+  processTouch('start', t.x, t.y, 'mouse');
+}
+function handleMouseUp(e) {
+  const t = touches['mouse'];
+  if (t) processTouch('end', t.x, t.y, 'mouse');
+  delete touches['mouse'];
+  mouseDown = false;
+}
+
+function handleTouchStart(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    touches[t.identifier] = { x: t.clientX, y: t.clientY };
+    processTouch('start', t.clientX, t.clientY, t.identifier);
+  }
+}
+
+function handleTouchEnd(e) {
+  e.preventDefault();
+  for (const t of e.changedTouches) {
+    const touch = touches[t.identifier];
+    if (touch) processTouch('end', touch.x, touch.y, t.identifier);
+    delete touches[t.identifier];
+  }
+}
+
+function processTouch(action, x, y, id) {
+  if (state !== 'playing') return;
+
+  for (let i = objects.length-1; i>=0; i--) {
+    const o = objects[i];
+    const dx = x - o.x;
+    const dy = y - o.y;
+    const dist = Math.sqrt(dx*dx + dy*dy);
+
+    if (action === 'start') {
+      if (o.type === 'tap' && dist < o.size + 30) {
+        hitObject(o, i, x, y);
+        return;
+      }
+      if (o.type === 'double_tap' && dist < o.size + 30) {
+        o.tapCount++;
+        burst(x, y, o.color, 6);
+        if (o.tapCount >= 2) {
+          hitObject(o, i, x, y);
+        }
+        return;
+      }
+      if (o.type === 'hold') {
+        activeHolds[id] = o;
+        o.holding = true;
+        return;
+      }
+      if (o.type === 'swipe_up' && y < H*0.5) {
+        // Swipe up detected
+        hitObject(o, i, x, y);
+        return;
+      }
+      if (o.type === 'swipe_down' && y > H*0.5) {
+        hitObject(o, i, x, y);
+        return;
+      }
+    }
+
+    if (action === 'end') {
+      if (o.type === 'swipe_up' || o.type === 'swipe_down') {
+        // Check if was a swipe gesture (finger moved up/down significantly)
+        const startY = touches[id] ? touches[id].y : y;
+        // We already handled in start for up/down, just check if still alive
+      }
+      if (activeHolds[id] === o) {
+        activeHolds[id] = null;
+        o.holding = false;
+        // Release too early = miss
+        if (o.holdProgress < o.holdTarget) {
+          missObject(o, i);
+        }
+        return;
+      }
+    }
+  }
+}
+
+function hitObject(o, idx, x, y) {
+  objects.splice(idx, 1);
+  burst(x, y, o.color, 12);
+  combo++;
+  comboTimer = 1.5;
+  const multiplier = Math.min(Math.floor(combo/3)+1, 5);
+  const pts = 10 * multiplier * Math.ceil(speed);
+  score += pts;
+  successCount++;
+  shakeTimer = 0.1;
+  scorePopup(o.x, o.y-20, '+'+pts+'  x'+multiplier, o.color);
+  if (highScore < score) highScore = score;
+}
+
+function missObject(o, idx) {
+  objects.splice(idx, 1);
+  burst(o.x, o.y, COLORS.neon5, 8);
+  combo = 0;
+  lives--;
+  shakeTimer = 0.25;
+  missedCount++;
+  scorePopup(o.x, o.y-20, 'MISS', COLORS.neon5);
+  if (lives <= 0) {
+    endGame();
+  }
+}
+
+// ===== Game Loop =====
+function update(dt) {
+  if (state !== 'playing') return;
+
+  // Speed increase
+  speedTimer += dt;
+  if (speedTimer >= 8) {
+    speedTimer = 0;
+    speed += 0.25;
+    spawnInterval = Math.max(600, 2000 - speed*200);
+  }
+
+  // Combo decay
+  if (comboTimer > 0) {
+    comboTimer -= dt;
+    if (comboTimer <= 0) combo = 0;
+  }
+
+  // Spawn
+  spawnTimer += dt * 1000;
+  if (spawnTimer >= spawnInterval) {
+    spawnTimer = 0;
+    spawnObject();
+  }
+
+  // Update objects
+  for (let i = objects.length-1; i>=0; i--) {
+    const o = objects[i];
+    o.life -= dt;
+    o.pulse = Math.sin(Date.now()*0.008)*4;
+
+    // Hold progress
+    if (o.type === 'hold') {
+      if (o.holding) {
+        o.holdProgress += dt;
+        if (o.holdProgress >= o.holdTarget) {
+          hitObject(o, i, o.x, o.y);
+          return;
+        }
+      }
+    }
+
+    if (o.life <= 0) {
+      missObject(o, i);
+    }
+  }
+
+  // Update particles
+  for (let i = particles.length-1; i>=0; i--) {
+    const p = particles[i];
+    p.x += p.vx;
+    p.y += p.vy;
+    p.vy += 0.2;
+    p.life -= dt*2;
+    if (p.life <= 0) particles.splice(i,1);
+  }
+
+  // Score popups
+  for (let i = scorePopups.length-1; i>=0; i--) {
+    const p = scorePopups[i];
+    p.y += p.vy;
+    p.life -= dt*1.2;
+    if (p.life <= 0) scorePopups.splice(i,1);
+  }
+
+  // Shake decay
+  if (shakeTimer > 0) shakeTimer -= dt;
+}
+
+// ===== Draw =====
+function draw() {
+  ctx.save();
+
+  // Screen shake
+  if (shakeTimer > 0) {
+    ctx.translate(
+      (Math.random()-0.5)*8*shakeTimer,
+      (Math.random()-0.5)*8*shakeTimer
+    );
+  }
+
+  // Background
+  ctx.fillStyle = COLORS.bg;
+  ctx.fillRect(0, 0, W, H);
+
+  // Grid lines (pixel style)
+  ctx.strokeStyle = 'rgba(255,255,255,0.03)';
+  ctx.lineWidth = 1;
+  const gridSize = 30;
+  for (let x=0; x<W; x+=gridSize) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+  }
+  for (let y=0; y<H; y+=gridSize) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+
+  // Speed glow lines (left/right edge)
+  if (speed > 1) {
+    const alpha = Math.min((speed-1)/3*0.4, 0.4);
+    ctx.strokeStyle = `rgba(0,255,136,${alpha})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(10,0); ctx.lineTo(10,H); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(W-10,0); ctx.lineTo(W-10,H); ctx.stroke();
+  }
+
+  if (state === 'menu') {
+    drawMenu();
+  } else if (state === 'playing' || state === 'gameover') {
+    drawGame();
+    if (state === 'gameover') drawGameOver();
+  }
+
+  ctx.restore();
+}
+
+function drawMenu() {
+  // Title
+  ctx.save();
+  ctx.textAlign = 'center';
+
+  // Pixel title effect
+  ctx.shadowColor = COLORS.neon1;
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = COLORS.neon1;
+  ctx.font = 'bold 36px monospace';
+  ctx.fillText('PIXEL', W/2, H*0.3);
+
+  ctx.shadowColor = COLORS.neon2;
+  ctx.fillStyle = COLORS.neon2;
+  ctx.font = 'bold 36px monospace';
+  ctx.fillText('RUSH', W/2, H*0.3 + 46);
+
+  // Subtitle
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#666';
+  ctx.font = '12px monospace';
+  ctx.fillText('像素冲击 · 反应挑战', W/2, H*0.3 + 75);
+
+  // Instructions
+  ctx.fillStyle = '#444';
+  ctx.font = '11px monospace';
+  ctx.fillText('TAP · SWIPE · HOLD · 2x TAP', W/2, H*0.52);
+  ctx.fillText('躲避越久 · 速度越快 · 分数越高', W/2, H*0.52 + 18);
+
+  // High score
+  if (highScore > 0) {
+    ctx.fillStyle = COLORS.neon4;
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('最高分: ' + highScore, W/2, H*0.62);
+  }
+
+  // Start button
+  drawNeonButton(W/2, H*0.75, '点击开始', COLORS.neon1, function() {
+    startGame();
+  });
+
+  ctx.restore();
+}
+
+function drawGame() {
+  // Draw objects
+  for (const o of objects) {
+    o.draw(o);
+  }
+
+  // Particles
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 10;
+    drawPixelRect(ctx, p.x-p.size/2, p.y-p.size/2, p.size, p.size);
+    ctx.restore();
+  }
+
+  // Score popups
+  for (const p of scorePopups) {
+    ctx.save();
+    ctx.globalAlpha = p.life;
+    ctx.fillStyle = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur = 10;
+    ctx.font = 'bold 18px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(p.text, p.x, p.y);
+    ctx.restore();
+  }
+
+  // HUD
+  drawHUD();
+}
+
+function drawHUD() {
+  ctx.save();
+  ctx.textAlign = 'left';
+
+  // Score
+  ctx.shadowColor = COLORS.white;
+  ctx.shadowBlur = 10;
+  ctx.fillStyle = COLORS.white;
+  ctx.font = 'bold 26px monospace';
+  ctx.fillText(score, 16, 46);
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#666';
+  ctx.font = '10px monospace';
+  ctx.fillText('SCORE', 16, 62);
+
+  // Combo
+  if (combo >= 2) {
+    ctx.textAlign = 'right';
+    ctx.shadowColor = COLORS.neon4;
+    ctx.shadowBlur = 15;
+    ctx.fillStyle = COLORS.neon4;
+    ctx.font = 'bold 22px monospace';
+    ctx.fillText('x' + Math.min(Math.floor(combo/3)+1, 5) + ' COMBO', W-16, 40);
+    ctx.shadowBlur = 0;
+  }
+
+  // Lives
+  ctx.textAlign = 'right';
+  for (let i=0; i<3; i++) {
+    ctx.fillStyle = i < lives ? COLORS.neon5 : '#222';
+    ctx.shadowColor = i < lives ? COLORS.neon5 : 'transparent';
+    ctx.shadowBlur = i < lives ? 12 : 0;
+    ctx.font = '18px sans-serif';
+    ctx.fillText('❤', W-16 - i*26, 75);
+  }
+
+  // Speed indicator
+  ctx.textAlign = 'left';
+  ctx.shadowBlur = 0;
+  const speedLabel = speed < 1.5 ? 'SLOW' : speed < 2.5 ? 'FAST' : 'CHAOS';
+  const speedColor = speed < 1.5 ? COLORS.neon3 : speed < 2.5 ? COLORS.neon4 : COLORS.neon5;
+  ctx.fillStyle = speedColor;
+  ctx.font = 'bold 10px monospace';
+  ctx.fillText(speedLabel, 16, 85);
+
+  ctx.restore();
+}
+
+function drawGameOver() {
+  // Dim
+  ctx.fillStyle = 'rgba(5,5,16,0.85)';
+  ctx.fillRect(0, 0, W, H);
+
+  ctx.save();
+  ctx.textAlign = 'center';
+
+  // Game over text
+  ctx.shadowColor = COLORS.neon5;
+  ctx.shadowBlur = 30;
+  ctx.fillStyle = COLORS.neon5;
+  ctx.font = 'bold 28px monospace';
+  ctx.fillText('GAME OVER', W/2, H*0.3);
+
+  // Score
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = COLORS.white;
+  ctx.font = 'bold 48px monospace';
+  ctx.fillText(score, W/2, H*0.45);
+  ctx.fillStyle = '#666';
+  ctx.font = '11px monospace';
+  ctx.fillText('最终得分', W/2, H*0.45 + 22);
+
+  // High score
+  if (score >= highScore) {
+    ctx.fillStyle = COLORS.neon4;
+    ctx.shadowColor = COLORS.neon4;
+    ctx.shadowBlur = 15;
+    ctx.font = 'bold 14px monospace';
+    ctx.fillText('★ 新纪录！★', W/2, H*0.58);
+    ctx.shadowBlur = 0;
+  } else {
+    ctx.fillStyle = '#555';
+    ctx.font = '12px monospace';
+    ctx.fillText('最高: ' + highScore, W/2, H*0.58);
+  }
+
+  // Stats
+  ctx.fillStyle = '#444';
+  ctx.font = '11px monospace';
+  ctx.fillText('成功: ' + successCount + '  ·  失误: ' + missedCount + '  ·  最高速度: ' + speed.toFixed(1) + 'x', W/2, H*0.66);
+
+  // Restart button
+  drawNeonButton(W/2, H*0.82, '再来一次', COLORS.neon1, function() {
+    startGame();
+  });
+
+  ctx.restore();
+}
+
+function drawNeonButton(x, y, text, color, onClick) {
+  const bw = 180, bh = 50;
+  const bx = x - bw/2, by = y - bh/2;
+
+  ctx.save();
+  ctx.shadowColor = color;
+  ctx.shadowBlur = 20;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.roundRect(bx, by, bw, bh, 12);
+  ctx.stroke();
+  ctx.fillStyle = color + '22';
+  ctx.fill();
+
+  ctx.fillStyle = color;
+  ctx.font = 'bold 16px monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText(text, x, y+6);
+
+  // Register click
+  const btn = { x:bx, y:by, w:bw, h:bh, cb:onClick, color };
+  buttonHitArea = btn;
+
+  ctx.restore();
+}
+
+let buttonHitArea = null;
+
+// Click/tap on button (for menu/gameover)
+canvas.addEventListener('click', function(e) {
+  if (!buttonHitArea) return;
+  const b = buttonHitArea;
+  if (e.clientX >= b.x && e.clientX <= b.x+b.w && e.clientY >= b.y && e.clientY <= b.y+b.h) {
+    b.cb();
+  }
+});
+
+// ===== Game Control =====
+function startGame() {
+  state = 'playing';
+  score = 0;
+  lives = 3;
+  speed = 1;
+  speedTimer = 0;
+  combo = 0;
+  comboTimer = 0;
+  objects = [];
+  particles = [];
+  scorePopups = [];
+  spawnTimer = 0;
+  spawnInterval = 2000;
+  missedCount = 0;
+  successCount = 0;
+  buttonHitArea = null;
+  // Spawn first object quickly
+  setTimeout(spawnObject, 500);
+}
+
+function endGame() {
+  state = 'gameover';
+  if (score > highScore) {
+    highScore = score;
+    localStorage.setItem('pixelrush_hs', highScore);
+  }
+}
+
+// ===== Main Loop =====
+function loop(time) {
+  const dt = Math.min((time - lastTime) / 1000, 0.1);
+  lastTime = time;
+  update(dt);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+// ===== Start =====
+loop(0);
+</script>
+</body>
+</html>
