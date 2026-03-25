@@ -47,7 +47,7 @@ function resize() {
 resize();
 window.addEventListener('resize', resize);
 
-// ===== Tutorial =====
+// ===== Tutorial buttons =====
 startBtn.addEventListener('click', function() {
   playMenuTick();
   tutorial.classList.add('hidden');
@@ -136,16 +136,18 @@ function missObject(o, idx) {
 }
 
 // ===== Input =====
-let activeHolds = {};
-let touchStartPos = {};
+let activeHolds = {};      // touch id -> object
+let touchStartPos = {};     // touch id -> {x, y}
+let pendingSwipes = {};    // touch id -> {startX, startY}  pending detection
 
-function onPointerStart(x, y, id) {
-  // Check start button hit
-  const btn = getStartBtnRect();
-  if (btn && x>=btn.x && x<=btn.x+btn.w && y>=btn.y && y<=btn.y+btn.h) {
-    playMenuTick();
-    tutorial.classList.add('hidden');
-    startGame();
+function handlePointerStart(x, y, id) {
+  if (state === 'gameover') {
+    // Restart button
+    const r = getRestartBtnRect();
+    if (r && x>=r.x && x<=r.x+r.w && y>=r.y && y<=r.y+r.h) {
+      playMenuTick();
+      startGame();
+    }
     return;
   }
 
@@ -153,121 +155,122 @@ function onPointerStart(x, y, id) {
 
   touchStartPos[id] = { x, y };
 
+  // Find object under touch
   for (let i=objects.length-1; i>=0; i--) {
     const o = objects[i];
     const dx = x - o.x;
     const dy = y - o.y;
     const dist = Math.sqrt(dx*dx + dy*dy);
 
-    if (o.type === 'tap' && dist < o.size + 30) {
+    if (o.type === 'tap' && dist < o.size + 35) {
       hitObject(o, i);
       return;
     }
-    if (o.type === 'double_tap' && dist < o.size + 30) {
+    if (o.type === 'double_tap' && dist < o.size + 35) {
       o.tapCount++;
       burst(x, y, o.color, 6);
       if (o.tapCount >= 2) hitObject(o, i);
       return;
     }
-    if (o.type === 'hold') {
+    if (o.type === 'hold' && dist < o.size + 40) {
       activeHolds[id] = o;
       o.holding = true;
       return;
     }
+    // Swipe objects: mark as pending, full swipe zone
     if (o.type === 'swipe_up' || o.type === 'swipe_down') {
-      activeHolds[id] = o;
+      pendingSwipes[id] = o;
       return;
     }
   }
 }
 
-function onPointerEnd(x, y, id) {
+function handlePointerEnd(x, y, id) {
   const startPos = touchStartPos[id];
   delete touchStartPos[id];
 
+  if (state === 'gameover') return;
   if (state !== 'playing') return;
 
-  const o = activeHolds[id];
-  if (!o) return;
-  activeHolds[id] = null;
-
-  if (o.type === 'hold') {
-    o.holding = false;
-    if (o.holdProgress < o.holdTarget) {
-      missObject(o, objects.indexOf(o));
+  // Check pending swipe
+  const o = pendingSwipes[id];
+  delete pendingSwipes[id];
+  if (o && startPos) {
+    const dy = startPos.y - y; // positive = finger moved UP
+    const swipeDist = Math.abs(dy);
+    const idx = objects.indexOf(o);
+    if (swipeDist > 35) {
+      if ((o.type === 'swipe_up' && dy > 0) || (o.type === 'swipe_down' && dy < 0)) {
+        hitObject(o, idx);
+      } else {
+        missObject(o, idx);
+      }
     }
     return;
   }
 
-  if (o.type === 'swipe_up' || o.type === 'swipe_down') {
-    if (startPos) {
-      const dy = startPos.y - y; // positive = swipe up
-      const swipeDist = Math.abs(dy);
-      const idx = objects.indexOf(o);
-      if (swipeDist > 30) {
-        if ((o.type === 'swipe_up' && dy > 0) || (o.type === 'swipe_down' && dy < 0)) {
-          hitObject(o, idx);
-        } else {
-          missObject(o, idx);
-        }
-      }
+  // Check hold release
+  const holdObj = activeHolds[id];
+  delete activeHolds[id];
+  if (holdObj) {
+    holdObj.holding = false;
+    const idx = objects.indexOf(holdObj);
+    if (idx >= 0 && holdObj.holdProgress < holdObj.holdTarget) {
+      missObject(holdObj, idx);
     }
   }
 }
 
-function getStartBtnRect() {
-  if (!startBtn) return null;
-  const r = startBtn.getBoundingClientRect();
-  return { x: r.left, y: r.top, w: r.width, h: r.height };
-}
-
-// Touch
+// Touch events
 canvas.addEventListener('touchstart', function(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
-    onPointerStart(t.clientX, t.clientY, t.identifier);
+    handlePointerStart(t.clientX, t.clientY, t.identifier);
   }
 }, {passive:false});
 
 canvas.addEventListener('touchend', function(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
-    const tp = touchStartPos[t.identifier];
-    onPointerEnd(tp ? tp.x : t.clientX, tp ? tp.y : t.clientY, t.identifier);
+    const startPos = touchStartPos[t.identifier];
+    handlePointerEnd(t.clientX, t.clientY, t.identifier);
+    // restore for touchend processing
+    if (startPos) touchStartPos[t.identifier] = startPos;
   }
 }, {passive:false});
 
 canvas.addEventListener('touchcancel', function(e) {
   e.preventDefault();
   for (const t of e.changedTouches) {
-    delete touchStartPos[t.identifier];
-    const o = activeHolds[t.identifier];
+    const o = pendingSwipes[t.identifier];
     if (o) {
-      activeHolds[t.identifier] = null;
-      if (o.type === 'hold') {
-        o.holding = false;
-        const idx = objects.indexOf(o);
-        if (idx >= 0 && o.holdProgress < o.holdTarget) missObject(o, idx);
-      }
+      const idx = objects.indexOf(o);
+      if (idx >= 0) missObject(o, idx);
+      delete pendingSwipes[t.identifier];
+    }
+    delete touchStartPos[t.identifier];
+    const holdObj = activeHolds[t.identifier];
+    delete activeHolds[t.identifier];
+    if (holdObj) {
+      holdObj.holding = false;
+      const idx = objects.indexOf(holdObj);
+      if (idx >= 0 && holdObj.holdProgress < holdObj.holdTarget) missObject(holdObj, idx);
     }
   }
 }, {passive:false});
 
-// Mouse
+// Mouse events
 canvas.addEventListener('mousedown', function(e) {
-  onPointerStart(e.clientX, e.clientY, 'mouse');
+  handlePointerStart(e.clientX, e.clientY, 'mouse');
 });
 canvas.addEventListener('mouseup', function(e) {
-  const p = touchStartPos['mouse'];
-  onPointerEnd(p ? p.x : e.clientX, p ? p.y : e.clientY, 'mouse');
-  delete touchStartPos['mouse'];
+  handlePointerEnd(e.clientX, e.clientY, 'mouse');
 });
 
 // ===== Update =====
 function update(dt) {
   if (state !== 'playing') return;
 
-  // Speed up
   speedTimer += dt;
   if (speedTimer >= 8) {
     speedTimer = 0;
@@ -275,20 +278,17 @@ function update(dt) {
     spawnInterval = Math.max(600, 2000 - speed*200);
   }
 
-  // Combo decay
   if (comboTimer > 0) {
     comboTimer -= dt;
     if (comboTimer <= 0) combo = 0;
   }
 
-  // Spawn
   spawnTimer += dt * 1000;
   if (spawnTimer >= spawnInterval) {
     spawnTimer = 0;
     spawnObject();
   }
 
-  // Update objects
   for (let i=objects.length-1; i>=0; i--) {
     const o = objects[i];
     o.life -= dt;
@@ -307,7 +307,6 @@ function update(dt) {
     }
   }
 
-  // Particles
   for (let i=particles.length-1; i>=0; i--) {
     const p = particles[i];
     p.x += p.vx;
@@ -317,7 +316,6 @@ function update(dt) {
     if (p.life <= 0) particles.splice(i,1);
   }
 
-  // Score popups
   for (let i=scorePopups.length-1; i>=0; i--) {
     const p = scorePopups[i];
     p.y += p.vy;
@@ -332,7 +330,6 @@ function update(dt) {
 function draw() {
   ctx.save();
 
-  // Shake
   if (shakeTimer > 0) {
     ctx.translate(
       (Math.random()-0.5)*8*shakeTimer,
@@ -340,7 +337,6 @@ function draw() {
     );
   }
 
-  // Background
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
@@ -352,7 +348,7 @@ function draw() {
 
   // Speed edge glow
   if (speed > 1) {
-    const alpha = Math.min((speed-1)/3*0.4, 0.4);
+    const alpha = Math.min((speed-1)/3*0.35, 0.35);
     ctx.strokeStyle = `rgba(0,255,136,${alpha})`;
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.moveTo(10,0); ctx.lineTo(10,H); ctx.stroke();
@@ -414,9 +410,9 @@ function drawHUD() {
   ctx.font = 'bold 26px Courier New, monospace';
   ctx.fillText(score, 16, 46);
   ctx.shadowBlur = 0;
-  ctx.fillStyle = '#666';
+  ctx.fillStyle = '#555';
   ctx.font = '10px Courier New, monospace';
-  ctx.fillText('SCORE', 16, 62);
+  ctx.fillText('SCORE', 16, 60);
 
   // Combo
   if (combo >= 2) {
@@ -437,7 +433,7 @@ function drawHUD() {
     ctx.shadowColor = i < lives ? COLORS.neon5 : 'transparent';
     ctx.shadowBlur = i < lives ? 12 : 0;
     ctx.font = '18px sans-serif';
-    ctx.fillText('❤', W-16 - i*26, 75);
+    ctx.fillText('❤', W-16 - i*26, 72);
   }
 
   // Speed
@@ -446,15 +442,24 @@ function drawHUD() {
   const speedColor = speed < 1.5 ? COLORS.neon3 : speed < 2.5 ? COLORS.neon4 : COLORS.neon5;
   ctx.fillStyle = speedColor;
   ctx.font = 'bold 10px Courier New, monospace';
-  ctx.fillText(speedLabel, 16, 85);
+  ctx.fillText(speedLabel, 16, 90);
 
   ctx.restore();
 }
 
+// ===== Restart Button =====
+let restartBtnRect = null;
+
+function getRestartBtnRect() {
+  return restartBtnRect;
+}
+
 function drawGameOver() {
-  // Dim
-  ctx.fillStyle = 'rgba(5,5,16,0.85)';
+  // Dim overlay - separate from shake
+  ctx.save();
+  ctx.fillStyle = 'rgba(5,5,16,0.88)';
   ctx.fillRect(0, 0, W, H);
+  ctx.restore();
 
   ctx.save();
   ctx.textAlign = 'center';
@@ -463,17 +468,17 @@ function drawGameOver() {
   ctx.shadowColor = COLORS.neon5;
   ctx.shadowBlur = 30;
   ctx.fillStyle = COLORS.neon5;
-  ctx.font = 'bold 28px Courier New, monospace';
-  ctx.fillText('GAME OVER', W/2, H*0.3);
+  ctx.font = 'bold 30px Courier New, monospace';
+  ctx.fillText('GAME OVER', W/2, H*0.28);
 
   // Score
   ctx.shadowBlur = 0;
   ctx.fillStyle = COLORS.white;
-  ctx.font = 'bold 48px Courier New, monospace';
-  ctx.fillText(score, W/2, H*0.45);
-  ctx.fillStyle = '#666';
+  ctx.font = 'bold 52px Courier New, monospace';
+  ctx.fillText(score, W/2, H*0.44);
+  ctx.fillStyle = '#555';
   ctx.font = '11px Courier New, monospace';
-  ctx.fillText('最终得分', W/2, H*0.45 + 22);
+  ctx.fillText('最终得分', W/2, H*0.44 + 24);
 
   // High score
   if (score >= highScore) {
@@ -481,22 +486,25 @@ function drawGameOver() {
     ctx.shadowColor = COLORS.neon4;
     ctx.shadowBlur = 15;
     ctx.font = 'bold 14px Courier New, monospace';
-    ctx.fillText('★ 新纪录！★', W/2, H*0.58);
+    ctx.fillText('★ 新纪录！★', W/2, H*0.56);
     ctx.shadowBlur = 0;
   } else {
-    ctx.fillStyle = '#555';
+    ctx.fillStyle = '#484848';
     ctx.font = '12px Courier New, monospace';
-    ctx.fillText('最高: ' + highScore, W/2, H*0.58);
+    ctx.fillText('最高: ' + highScore, W/2, H*0.56);
   }
 
   // Stats
-  ctx.fillStyle = '#444';
+  ctx.fillStyle = '#3a3a3a';
   ctx.font = '11px Courier New, monospace';
-  ctx.fillText('成功: ' + successCount + '  ·  失误: ' + missedCount + '  ·  最高速度: ' + speed.toFixed(1) + 'x', W/2, H*0.66);
+  ctx.fillText('成功: ' + successCount + '  ·  失误: ' + missedCount + '  ·  最高速度: ' + speed.toFixed(1) + 'x', W/2, H*0.64);
 
-  // Restart - draw button manually
+  // Restart button
   const bw = 200, bh = 52;
-  const bx = W/2 - bw/2, by = H*0.82 - bh/2;
+  const bx = W/2 - bw/2;
+  const by = H * 0.78;
+  restartBtnRect = { x:bx, y:by, w:bw, h:bh };
+
   ctx.shadowColor = COLORS.neon1;
   ctx.shadowBlur = 20;
   ctx.strokeStyle = COLORS.neon1;
@@ -507,22 +515,10 @@ function drawGameOver() {
   ctx.fillStyle = 'rgba(0,255,136,0.08)';
   ctx.fill();
   ctx.fillStyle = COLORS.neon1;
-  ctx.font = 'bold 16px Courier New, monospace';
-  ctx.fillText('再来一次', W/2, H*0.82 + 6);
-
-  // Register restart button hit area
-  const restartBtn = { x:bx, y:by, w:bw, h:bh };
+  ctx.font = 'bold 15px Courier New, monospace';
+  ctx.fillText('再来一次', W/2, by + bh/2 + 5);
 
   ctx.restore();
-
-  // Restart on click
-  canvas.onclick = function(e) {
-    const r = restartBtn;
-    if (e.clientX>=r.x && e.clientX<=r.x+r.w && e.clientY>=r.y && e.clientY<=r.y+r.h) {
-      playMenuTick();
-      startGame();
-    }
-  };
 }
 
 // ===== Game Control =====
@@ -543,7 +539,9 @@ function startGame() {
   successCount = 0;
   activeHolds = {};
   touchStartPos = {};
-  canvas.onclick = null;
+  pendingSwipes = {};
+  restartBtnRect = null;
+  shakeTimer = 0;
   setTimeout(spawnObject, 500);
 }
 
